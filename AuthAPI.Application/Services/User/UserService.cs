@@ -2,7 +2,7 @@ using AuthAPI.Application.Dto;
 using AuthAPI.Application.Interface;
 using AuthAPI.Application.Services.Role;
 using AuthAPI.DAL.Data;
-using AuthorizationAPI.Utils;
+using AuthAPI.Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 
 namespace AuthAPI.Application.Services.User;

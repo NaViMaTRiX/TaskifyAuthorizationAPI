@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace AuthorizationAPI.Utils;
+namespace AuthAPI.Shared.Helpers;
 
 public static class EmailValidationHelper
 {
@@ -11,9 +11,6 @@ public static class EmailValidationHelper
 
     public static bool IsValidEmail(string email)
     {
-        if (string.IsNullOrWhiteSpace(email))
-            return false;
-
-        return EmailRegex.IsMatch(email);
+        return !string.IsNullOrWhiteSpace(email) && EmailRegex.IsMatch(email);
     }
 }

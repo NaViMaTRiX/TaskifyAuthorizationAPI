@@ -1,13 +1,15 @@
 using System.ComponentModel.DataAnnotations;
+using AuthAPI.Application.CQRS.Commands.RefreshToken;
+using AuthAPI.Application.CQRS.Commands.User;
+using AuthAPI.Application.CQRS.Queries.RefreshToken;
+using AuthAPI.Application.CQRS.Queries.User;
 using AuthAPI.Application.Dto;
 using AuthAPI.Application.Interface;
 using AuthAPI.Application.Services.Role;
 using AuthAPI.DAL.Data;
-using AuthAPI.Domain.Enums;
 using AuthAPI.Domain.Models;
 using AuthAPI.Shared.Exceptions;
 using AuthAPI.Shared.Helpers;
-using AuthorizationAPI.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using UnauthorizedAccessException = System.UnauthorizedAccessException;
@@ -23,6 +25,11 @@ public class AuthService(
     IPasswordService passwordService,
     IAuditService auditService,
     ILoginActivityService loginActivityService,
+    GetUserByEmailHandler getUserByEmailHandler,
+    AddUserHandler addUserHandler,
+    GetRefreshTokenHandler getRefreshTokenHandler,
+    AddRefreshTokenHandler addRefreshTokenHandler,
+    DeleteRefreshToken deleteRefreshTokenHandler,
     IMessagePublisher messagePublisher) : IAuthService
 {
     public async Task<AuthResponse> LoginAsync(LoginRequest request, string? ipAddress, string userAgent, CancellationToken cancellationToken = default)
@@ -32,9 +39,7 @@ public class AuthService(
         var deviceInfo = DeviceInfoParser.GetDeviceInfo(userAgent);
 
         // Пытаемся получить пользователя по email
-        var user = await context.Users
-            .Include(u => u.RefreshTokens)
-            .FirstOrDefaultAsync(u => u.Email == request.Email, cancellationToken);
+        var user = await getUserByEmailHandler.Handler(request, cancellationToken);
 
         if (user is null)
         {
@@ -92,6 +97,7 @@ public class AuthService(
     /// <inheritdoc/>
     public async Task<AuthResponse> RegisterAsync(RegisterRequest request, string? ipAddress, CancellationToken cancellationToken = default)
     {
+        var ip = ipAddress ?? "Unknown";
         // Валидация email
         var emailValidator = new EmailAddressAttribute();
         if (!emailValidator.IsValid(request.Email))
@@ -101,29 +107,20 @@ public class AuthService(
         if (request.Password.Length < 8)
             throw new ArgumentException("Пароль должен содержать минимум 8 символов.", nameof(request.Password));
 
-        var user = new Domain.Models.User
-        {
-            Id = Guid.NewGuid(),
-            Email = request.Email,
-            PasswordHash = passwordService.HashPassword(request.Password),
-            FirstName = request.FirstName,
-            LastName = request.LastName,
-            CreatedAt = DateTime.UtcNow,
-            Role = UserRole.User // Устанавливаем роль по умолчанию
-        };
-
+        AuthResponse response;
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            context.Users.Add(user);
-            await context.SaveChangesAsync(cancellationToken);
+            var user = await addUserHandler.Handler(request, cancellationToken);
 
             // Логирование регистрации
-            var ip = ipAddress ?? "Unknown";
             await auditService.LogRegistrationAsync(user.Id, ip, true, cancellationToken);
 
             // Фиксируем транзакцию
             await transaction.CommitAsync(cancellationToken);
+            
+            response = await tokenService.GenerateAuthResponseAsync(user, cancellationToken);
+
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
         {
@@ -137,16 +134,14 @@ public class AuthService(
             throw;
         }
 
-        return await tokenService.GenerateAuthResponseAsync(user, cancellationToken);
+        return response;
     }
 
     /// <inheritdoc />
     public async Task<AuthResponse> RefreshTokenAsync(string refreshToken, string? ipAddress, CancellationToken cancellationToken = default)
     {
         // Проверяем наличие refresh токена в базе данных
-        var existingRefreshToken = await context.RefreshTokens
-            .Include(rt => rt.User)
-            .FirstOrDefaultAsync(rt => rt.Token == refreshToken, cancellationToken);
+        var existingRefreshToken = await getRefreshTokenHandler.Handler(refreshToken, cancellationToken);
 
         // Если токен не найден или просрочен - логируем и возвращаем ошибку
         if (existingRefreshToken is null || existingRefreshToken.ExpiresAt < DateTime.UtcNow || existingRefreshToken.IsRevoked)
@@ -157,18 +152,7 @@ public class AuthService(
 
         var user = existingRefreshToken.User;
 
-        // Генерируем новые токены
-        var newJwtToken = tokenService.GenerateJwtToken(user);
-        var newRefreshTokenString = tokenService.GenerateRefreshToken();
-
-        var newRefreshToken = new RefreshToken
-        {
-            Token = newRefreshTokenString,
-            UserId = user.Id,
-            CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(14)
-        };
-
+        TokenResponse tokens;
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
@@ -177,13 +161,9 @@ public class AuthService(
             existingRefreshToken.RevokedAt = DateTime.UtcNow;
 
             // Удаляем старые токены пользователя
-            await context.RefreshTokens
-                .Where(rt => rt.UserId == user.Id && rt.IsRevoked)
-                .ExecuteDeleteAsync(cancellationToken);
+            await deleteRefreshTokenHandler.Handler(user, cancellationToken);
 
-            // Сохраняем новый refresh токен
-            context.RefreshTokens.Add(newRefreshToken);
-            await context.SaveChangesAsync(cancellationToken);
+            tokens = await addRefreshTokenHandler.Handler(user, cancellationToken);
 
             // Фиксируем транзакцию
             await transaction.CommitAsync(cancellationToken);
@@ -194,11 +174,11 @@ public class AuthService(
             throw;
         }
 
-        // Возвращаем новые токены
+        // Возвращаем пользователя с новыми токенами
         return new AuthResponse
         {
-            Token = newJwtToken,
-            RefreshToken = newRefreshTokenString,
+            Token = tokens.JwtToken,
+            RefreshToken = tokens.RefreshToken.ToString(),
             ExpiresAt = DateTime.UtcNow.AddDays(3),
             User = new UserDto
             {

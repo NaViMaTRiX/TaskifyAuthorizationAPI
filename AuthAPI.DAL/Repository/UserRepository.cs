@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AuthAPI.DAL.Repository;
 
-public class UserRepo(AuthDbContext context) : IUser
+public abstract class UserRepository(AuthDbContext context) : IUser
 {
     public async Task<List<IGrouping<UserRole, User>>> GetUserRoleUserTable(CancellationToken cancellationToken = default)
     {

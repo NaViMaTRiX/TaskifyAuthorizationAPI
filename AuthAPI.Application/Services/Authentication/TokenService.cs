@@ -45,7 +45,10 @@ public class TokenService(AuthDbContext context, IConfiguration configuration) :
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Создаёт refresh token
+    /// </summary>
+    /// <returns>Возвращает refresh token</returns>
     public string GenerateRefreshToken()
     {
         var randomNumber = new byte[32];
@@ -67,7 +70,7 @@ public class TokenService(AuthDbContext context, IConfiguration configuration) :
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddDays(14)
         };
-        //try catch
+        
         context.RefreshTokens.Add(refreshToken);
         await context.SaveChangesAsync(cancellationToken);
 
@@ -98,7 +101,7 @@ public class TokenService(AuthDbContext context, IConfiguration configuration) :
             ValidateIssuer = true,
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["Jwt:Key"] ?? string.Empty)),
-            ValidateLifetime = false, // Важно! Отключаем проверку времени жизни
+            ValidateLifetime = true,
             ValidIssuer = configuration["Jwt:Issuer"],
             ValidAudience = configuration["Jwt:Audience"]
         };
@@ -202,37 +205,34 @@ public class TokenService(AuthDbContext context, IConfiguration configuration) :
         var token = await context.RefreshTokens
             .FirstOrDefaultAsync(rt => rt.Token == refreshToken, cancellationToken);
 
-        if (token != null)
+        if (token is not null)
         {
             context.RefreshTokens.Remove(token);
             await context.SaveChangesAsync(cancellationToken);
         }
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Извлекает юзера из токена
+    /// </summary>
+    /// <param name="token"></param>
+    /// <param name="cancellationToken"></param>
+    /// <returns>Возвращает юзера по токену</returns>
+    /// <exception cref="SecurityTokenException"></exception>
     public Task<JwtTokenClaimsDto> ExtractTokenClaimsAsync(string token, CancellationToken cancellationToken = default)
     {
-        try 
-        {
-            var tokenHandler = new JwtSecurityTokenHandler();
+        var tokenHandler = new JwtSecurityTokenHandler();
 
-            if (tokenHandler.ReadToken(token) is not JwtSecurityToken jwtToken)
-            {
-                throw new SecurityTokenException();
-            }
-
-            return Task.FromResult(new JwtTokenClaimsDto
-            {
-                UserId = Guid.Parse(jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value ?? Guid.Empty.ToString()),
-                Email = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value,
-                FirstName = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.GivenName)?.Value,
-                LastName = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Surname)?.Value,
-                Role = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Role)?.Value
-            });
-        }
-        catch (Exception)
-        {
+        if (tokenHandler.ReadToken(token) is not JwtSecurityToken jwtToken)
             throw new SecurityTokenException();
-        }
+
+        return Task.FromResult(new JwtTokenClaimsDto
+        {
+            UserId = Guid.Parse(jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value ?? Guid.Empty.ToString()),
+            Email = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value,
+            FirstName = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.GivenName)?.Value,
+            LastName = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Surname)?.Value,
+            Role = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Role)?.Value
+        });
     }
 }

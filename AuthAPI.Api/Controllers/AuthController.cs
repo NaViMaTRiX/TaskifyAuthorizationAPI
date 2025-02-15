@@ -13,7 +13,7 @@ public class AuthController(IAuthService authService) : ControllerBase
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
     {
-        var ipAddress = IpAddressHelper.GetClientIpAddress(HttpContext);    // Определение IP-адреса
+        var ipAddress = IpAddressHelper.GetClientIpAddress(HttpContext);    // Определение IP-адреса автоматически
         var userAgent = HttpContext.Request.Headers.UserAgent.ToString();
         var response = await authService.LoginAsync(request, ipAddress, userAgent, cancellationToken);
         return Ok(response);

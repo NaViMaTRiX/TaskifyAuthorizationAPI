@@ -21,6 +21,7 @@ public interface ITokenService
 
     /// <summary>
     /// Создание полного ответа аутентификации с токенами
+    /// <returns>AuthResponse или пользователя с токенами</returns>
     /// </summary>
     Task<AuthResponse> GenerateAuthResponseAsync(User user, CancellationToken cancellationToken = default);
 

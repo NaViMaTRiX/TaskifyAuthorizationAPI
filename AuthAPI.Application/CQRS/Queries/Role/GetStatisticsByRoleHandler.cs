@@ -5,12 +5,12 @@ using AuthAPI.DAL.Repository;
 
 namespace AuthAPI.Application.CQRS.Queries.Role;
 
-public class GetStatisticsByRoleHandler(UserRepo userRepo, CountAsyncHandler countHandler)
+public class GetStatisticsByRoleHandler(UserRepository userRepository, CountAsyncHandler countHandler)
 {
     public async Task<List<RoleStatisticsDto>> Handler(CancellationToken cancellationToken = default)
     {
         var totalUsers = await countHandler.Handler(cancellationToken);
-        var userRole = await userRepo.GetUserRoleUserTable(cancellationToken);
+        var userRole = await userRepository.GetUserRoleUserTable(cancellationToken);
 
         if (userRole is null)
             throw new KeyNotFoundException();

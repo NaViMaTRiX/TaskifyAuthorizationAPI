@@ -85,16 +85,16 @@ public class AuditService(AuthDbContext context) : IAuditService
         DateTime? endDate = null,
         CancellationToken cancellationToken = default)
     {
-        var query = context.UserAuditLogs
+        var userLog = context.UserAuditLogs
             .Where(log => log.UserId == userId);
 
         if (startDate.HasValue)
-            query = query.Where(log => log.Timestamp >= startDate.Value);
+            userLog = userLog.Where(log => log.Timestamp >= startDate.Value);
 
         if (endDate.HasValue)
-            query = query.Where(log => log.Timestamp <= endDate.Value);
+            userLog = userLog.Where(log => log.Timestamp <= endDate.Value);
 
-        return await query
+        return await userLog
             .OrderByDescending(log => log.Timestamp)
             .ToListAsync(cancellationToken);
     }
