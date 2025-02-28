@@ -1,20 +1,17 @@
-using AuthAPI.DAL.Data;
-using Microsoft.EntityFrameworkCore;
+using AuthAPI.DAL.Repository;
 
 namespace AuthAPI.Application.CQRS.Queries.User;
 
-public class CountAsyncHandler(AuthDbContext context)
+public class CountAsyncHandler(UserRepository userRepository)
 {
     /// <summary>
-    /// Return count all users
+    /// Метод получение количества всех пользователей
     /// </summary>
     /// <param name="cancellationToken">CancellationToken</param>
-    /// <returns></returns>
+    /// <returns>Return count all users</returns>
     public async Task<int> Handler(CancellationToken cancellationToken = default)
     {
-        var totalUsers = await context.Users
-            .AsNoTracking()
-            .CountAsync(cancellationToken); // Не знаю как проверить
+        var totalUsers = await userRepository.CountAsync(cancellationToken);
         
         return totalUsers;
     }

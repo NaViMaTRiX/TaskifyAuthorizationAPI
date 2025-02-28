@@ -22,3 +22,5 @@ public class TooManyRequestsException() : AuthException(HttpStatusCode.TooManyRe
 
 // Ошибки сервера (500 Internal Server Error)
 public class DatabaseConnectionException() : AuthException(HttpStatusCode.InternalServerError, "Ошибка соединения с базой данных. Попробуйте позже");
+
+public class AccountTemporarilyLockedException() : AuthException(HttpStatusCode.Conflict, "Вход временно заблокирован из-за подозрительной активности");

@@ -2,7 +2,7 @@ using System.Security.Claims;
 using AuthAPI.Application.Services.Role;
 using AuthAPI.Domain.Enums;
 using AuthAPI.Shared.Attributes;
-using AuthorizationAPI.Domain.Enums;
+using AuthAPI.Shared.Helpers;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AuthAPI.Api.Controllers;
@@ -24,40 +24,26 @@ public class UserRoleController(RoleManagementService roleManagementService) : C
         [FromQuery] UserRole newRole,
         CancellationToken cancellationToken)
     {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        var ipAddress = IpAddressHelper.GetClientIpAddress(HttpContext);
         // Получаем текущую роль администратора из токена
         var currentUserRoleClaim = User.FindFirst(ClaimTypes.Role);
         
-        if (currentUserRoleClaim == null)//TODO: заменить
+        if (currentUserRoleClaim is null)//TODO: заменить
             return Unauthorized("Не удалось определить роль текущего пользователя");
 
         var currentUserRole = Enum.Parse<UserRole>(currentUserRoleClaim.Value);
 
-        try//TODO: заменить
-        {
-            await roleManagementService.ChangeUserRoleAsync(
-                userId, 
-                newRole, 
-                currentUserRole, 
-                cancellationToken);
+        await roleManagementService.ChangeUserRoleAsync(
+            userId, 
+            newRole, 
+            currentUserRole,
+            ipAddress,
+            cancellationToken);
 
-            return Ok($"Роль пользователя изменена на {newRole}");
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return Forbid("Отказано в доступе");
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-        catch (Exception)
-        {
-            return StatusCode(500, "Внутренняя ошибка сервера");
-        }
+        return Ok($"Роль пользователя изменена на {newRole}");
     }
 
     /// <summary>
@@ -67,15 +53,11 @@ public class UserRoleController(RoleManagementService roleManagementService) : C
     [RoleAccess(UserRole.Admin, UserRole.SuperAdmin)]
     public async Task<IActionResult> GetRoleStatistics(CancellationToken cancellationToken)
     {
-        try
-        {
-            var statistics = await roleManagementService.GetDetailedRoleStatisticsAsync(cancellationToken);
-            return Ok(statistics);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new { message = e.Message });
-        }
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        var statistics = await roleManagementService.GetDetailedRoleStatisticsAsync(cancellationToken);
+        return Ok(statistics);
     }
 
     /// <summary>
@@ -87,21 +69,13 @@ public class UserRoleController(RoleManagementService roleManagementService) : C
         [FromQuery] Guid userId, 
         CancellationToken cancellationToken)
     {
-        try
-        {
-            var statistics = await roleManagementService.GetUserStatisticsAsync(
-                userId,
-                cancellationToken);
-            return Ok(statistics);
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        var statistics = await roleManagementService.GetUserStatisticsAsync(
+            userId,
+            cancellationToken);
+        return Ok(statistics);
     }
 
     /// <summary>
@@ -113,22 +87,19 @@ public class UserRoleController(RoleManagementService roleManagementService) : C
         [FromQuery] UserRole role, 
         CancellationToken cancellationToken)
     {
-        try
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        var users = await roleManagementService.GetUsersByRoleAsync(role, cancellationToken);
+        return Ok(users.Select(u => new
         {
-            var users = await roleManagementService.GetUsersByRoleAsync(role, cancellationToken);
-            return Ok(users.Select(u => new
-            {
-                u.Id,
-                u.Email,
-                u.FirstName,
-                u.LastName,
-                Role = u.Role.ToString()
-            }));
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new { message = e.Message });
-        }
+            u.Id,
+            u.Email,
+            u.Username,
+            u.FirstName,
+            u.LastName,
+            Role = u.Role.ToString()
+        })); // TODO: добавить маппинг
     }
 
     /// <summary>
@@ -137,22 +108,19 @@ public class UserRoleController(RoleManagementService roleManagementService) : C
     [HttpGet("all-roles")]
     public IActionResult GetAllRoles()
     {
-        try
-        {
-            var roles = Enum.GetValues(typeof(UserRole))
-                .Cast<UserRole>()
-                .Select(role => new
-                {
-                    Role = role,
-                    Description = RoleManagementService.GetRoleDescription(role)
-                })
-                .ToList();
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
 
-            return Ok(roles);
-        }
-        catch (Exception e)
-        {
-            return BadRequest(new { message = e.Message });
-        }
+        var roles = Enum.GetValues(typeof(UserRole))
+            .Cast<UserRole>()
+            .Select(role => new
+            {
+                Role = role,
+                Description = RoleManagementService.GetEnumDescription(role)
+            })
+            .ToList();
+
+        return Ok(roles);
+
     }
 }

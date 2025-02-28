@@ -1,7 +1,7 @@
 namespace AuthAPI.Application.Dto;
 
-public class LogoutRequest
+public record LogoutRequest
 {
-    public string RefreshToken { get; set; } = string.Empty;
-    public bool LogoutFromAllDevices { get; set; }
+    public required string RefreshToken { get; init; }
+    public required bool LogoutFromAllDevices { get; init; }
 }

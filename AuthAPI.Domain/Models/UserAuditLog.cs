@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using AuthorizationAPI.Domain.Enums;
+using AuthAPI.Domain.Enums;
 
 namespace AuthAPI.Domain.Models;
 
@@ -14,33 +14,32 @@ public class UserAuditLog
     /// </summary>
     [Key]
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
-    public long Id { get; set; }
+    public long Id { get; init; }
 
     /// <summary>
     /// Идентификатор пользователя
     /// </summary>
-    [Required]
-    public Guid UserId { get; set; }
+    public Guid? UserId { get; init; }
 
     /// <summary>
     /// Тип действия
     /// </summary>
     [Required]
-    public AuditAction Action { get; set; }
+    public AuditAction Action { get; init; }
 
     /// <summary>
     /// IP-адрес, с которого выполнено действие
     /// </summary>
-    public string? IpAddress { get; set; }
+    public string? IpAddress { get; init; }
 
     /// <summary>
     /// Дополнительные детали действия
     /// </summary>
-    public string? Details { get; set; }
+    public string? Details { get; init; }
 
     /// <summary>
     /// Временная метка действия
     /// </summary>
     [Required]
-    public DateTime Timestamp { get; set; }
+    public DateTime Timestamp { get; init; }
 }

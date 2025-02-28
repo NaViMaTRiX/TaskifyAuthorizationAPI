@@ -1,19 +1,27 @@
-using AuthAPI.Application.Dto;
-using AuthAPI.DAL.Data;
-using AuthAPI.Shared.Exceptions;
-using Microsoft.EntityFrameworkCore;
+using AuthAPI.DAL.Interfaces;
+using AuthAPI.Shared.Helpers;
+using MediatR;
 
 namespace AuthAPI.Application.CQRS.Queries.User;
 
-public class GetUserByEmailHandler(AuthDbContext context)
+public record GetByEmailRequest(string Email) : IRequest<Domain.Models.User>;
+
+public class GetUserByEmailHandler(IUserRepository userRepository) : IRequestHandler<GetByEmailRequest, Domain.Models.User>
 {
-    public async Task<Domain.Models.User> Handler(LoginRequest request, CancellationToken cancellationToken = default)
+    public async Task<Domain.Models.User> Handle(GetByEmailRequest request, CancellationToken cancellationToken = default)
     {
-        var user = await context.Users
-            .Include(u => u.RefreshTokens)
-            .FirstOrDefaultAsync(u => u.Email == request.Email, cancellationToken);
+        if (request is null)
+            throw new ArgumentNullException(nameof(request));
         
-        return user;
+        var email = request.Email;
+        
+        // Валидация email
+        if (!EmailValidationHelper.IsValidEmail(email) || string.IsNullOrWhiteSpace(email))
+            throw new ArgumentException("Некорректный формат email.", nameof(email));
+
+        var user = await userRepository.GetByRefreshTokenAsync(email, cancellationToken);
+        
+        return user!;
     }
 
 }

@@ -1,26 +1,37 @@
-using AuthAPI.DAL.Repository;
+using AuthAPI.DAL.Interfaces;
 using AuthAPI.Domain.Enums;
+using MediatR;
 
 namespace AuthAPI.Application.CQRS.Queries.Role;
 
-public class GetUserRoleStatisticsHandler(UserRepository userRepository)
+public record GetUserRoleStatisticsRequest() : IRequest<Dictionary<UserRole, int>>;
+
+public class GetUserRoleStatisticsHandler(IRoleRepository roleRepository) 
+    : IRequestHandler<GetUserRoleStatisticsRequest, Dictionary<UserRole, int>>
 {
     /// <summary>
     /// Получить количество пользователей с каждой ролью
     /// </summary>
+    /// <param name="request">Запрос(В нём ничего)</param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async Task<Dictionary<UserRole, int>> Handler(CancellationToken cancellationToken = default)
+    public async Task<Dictionary<UserRole, int>> Handle(GetUserRoleStatisticsRequest request, CancellationToken cancellationToken = default)
     {
-        var userRole = await userRepository.GetUserRoleUserTable(cancellationToken);
-
-        if(userRole is null)
-            throw new KeyNotFoundException();
+        if (request is null) 
+            throw new ArgumentNullException(nameof(request));
         
-        var userStats =  userRole
+        var userRole = await roleRepository.AllRolesGroupByAsync(cancellationToken);
+
+        if (userRole is null)
+            throw new KeyNotFoundException();
+
+        if (userRole is null)
+            throw new KeyNotFoundException();
+
+        var userStats = userRole
             .Select(g => new { Role = g.Key, Count = g.Count() })
             .ToDictionary(x => x.Role, x => x.Count);
-        
+
         return userStats;
     }
 }

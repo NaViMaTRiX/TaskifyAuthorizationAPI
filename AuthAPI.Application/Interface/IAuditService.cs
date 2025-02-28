@@ -39,4 +39,26 @@ public interface IAuditService
         string refreshToken, 
         string? ipAddress,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Записать событие удаления пользователя
+    /// </summary>
+    /// <param name="userId">Идентификатор пользователя</param>
+    /// <param name="ipAddress">IP-адрес пользователя</param>
+    /// <param name="cancellationToken">Токен отмены</param>
+    Task LogUserDeletionAsync(
+        Guid userId,
+        string ipAddress,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Записать событие обновления пользователя
+    /// </summary>
+    /// <param name="userId">Идентификатор пользователя</param>
+    /// <param name="ipAddress">IP-адрес пользователя</param>
+    /// <param name="cancellationToken">Токен отмены</param>
+    Task LogUserUpdateAsync(
+        Guid userId,
+        string ipAddress,
+        CancellationToken cancellationToken = default);
 }

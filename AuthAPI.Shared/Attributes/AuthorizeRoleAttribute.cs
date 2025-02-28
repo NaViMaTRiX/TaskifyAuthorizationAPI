@@ -1,5 +1,4 @@
 using AuthAPI.Domain.Enums;
-using AuthorizationAPI.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 
 namespace AuthAPI.Shared.Attributes;

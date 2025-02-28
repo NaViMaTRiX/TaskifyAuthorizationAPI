@@ -1,18 +1,16 @@
-using System.ComponentModel.DataAnnotations;
 using AuthAPI.Application.CQRS.Commands.RefreshToken;
-using AuthAPI.Application.CQRS.Commands.User;
+using AuthAPI.Application.CQRS.Commands.User.CreateUser;
 using AuthAPI.Application.CQRS.Queries.RefreshToken;
 using AuthAPI.Application.CQRS.Queries.User;
 using AuthAPI.Application.Dto;
 using AuthAPI.Application.Interface;
-using AuthAPI.Application.Services.Role;
+using AuthAPI.Application.Mapping;
 using AuthAPI.DAL.Data;
-using AuthAPI.Domain.Models;
+using AuthAPI.DAL.Interfaces;
 using AuthAPI.Shared.Exceptions;
 using AuthAPI.Shared.Helpers;
-using Microsoft.EntityFrameworkCore;
-using Npgsql;
-using UnauthorizedAccessException = System.UnauthorizedAccessException;
+using MediatR;
+using Microsoft.Extensions.Logging;
 
 namespace AuthAPI.Application.Services.Authentication;
 
@@ -25,170 +23,121 @@ public class AuthService(
     IPasswordService passwordService,
     IAuditService auditService,
     ILoginActivityService loginActivityService,
-    GetUserByEmailHandler getUserByEmailHandler,
-    AddUserHandler addUserHandler,
-    GetRefreshTokenHandler getRefreshTokenHandler,
-    AddRefreshTokenHandler addRefreshTokenHandler,
-    DeleteRefreshToken deleteRefreshTokenHandler,
+    IMediator mediator,
+    IUserRepository userRepository,
+    ILogger<AuthService> logger,
     IMessagePublisher messagePublisher) : IAuthService
 {
     public async Task<AuthResponse> LoginAsync(LoginRequest request, string? ipAddress, string userAgent, CancellationToken cancellationToken = default)
     {
-        // Вычисляем общие значения один раз
         var ip = ipAddress ?? "Unknown";
         var deviceInfo = DeviceInfoParser.GetDeviceInfo(userAgent);
+        var deviceFingerprint = DeviceHelper.GenerateDeviceFingerprint(deviceInfo);
 
-        // Пытаемся получить пользователя по email
-        var user = await getUserByEmailHandler.Handler(request, cancellationToken);
+        var user = await mediator.Send(new GetByEmailRequest(request.Email), cancellationToken);
+        
+        // 🔹 Проверка возможности входа (подозрительные попытки, блокировки)
+        var isLoginAllowed = await loginActivityService.IsLoginAllowedAsync(
+            user.Id, ip, deviceFingerprint, cancellationToken);
 
-        if (user is null)
+        if (!isLoginAllowed)
         {
-            await auditService.LogLoginAsync(Guid.Empty, ip, false, cancellationToken);
-            await loginActivityService.RecordFailedLoginAsync(Guid.Empty, ip, deviceInfo, cancellationToken);
-            throw new InvalidCredentialsException();
+            // Логируем попытку входа при блокировке
+            await auditService.LogLoginAsync(user.Id, ip, false, cancellationToken);
+
+            // Не записываем неудачную попытку в активность, если вход уже заблокирован,
+            // чтобы избежать "двойного счета"
+            throw new AccountTemporarilyLockedException();
         }
 
+        // 🔹 Валидация пароля
+        if (!PasswordValidationHelper.IsValidPassword(request.Password, logger))
+            throw new ArgumentException("Пароль не соответствует требованиям безопасности", nameof(request.Password));
+        
         // Проверка пароля
         if (!passwordService.VerifyPassword(request.Password, user.PasswordHash))
         {
-            await auditService.LogLoginAsync(Guid.Empty, ip, false, cancellationToken);
-            await loginActivityService.RecordFailedLoginAsync(Guid.Empty, ip, deviceInfo, cancellationToken);
+            await auditService.LogLoginAsync(user.Id, ip, false, cancellationToken);
+            await loginActivityService.RecordFailedLoginAsync(user.Id, ip, deviceInfo, cancellationToken);
             throw new InvalidCredentialsException();
         }
         
-        // TODO: Проверка на возможность входа в систему
+        // 🔹 Проверка на подозрительный вход для возможной двухфакторной аутентификации
+        // var isSuspiciousLogin = await loginActivityService.IsSuspiciousLoginAsync(
+        //     user.Id, ip, deviceFingerprint, cancellationToken);
         
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
             // Обновляем время последнего входа
-            user.LastLoginAt = DateTime.UtcNow;
-            await context.SaveChangesAsync(cancellationToken);
-                    
+            await userRepository.UpdateLastTimeAsync(user, cancellationToken);
+            
             // Отправляем уведомление в RabbitMQ
-            var notificationMessage = new LoginNotificationMessage
-            {
-                UserId = user.Id,
-                Email = user.Email,
-                IpAddress = ipAddress,
-                DeviceInfo = deviceInfo,
-                LoginTime = DateTime.UtcNow,
-            };
-            await messagePublisher.PublishAsync("login-notifications", notificationMessage);
+            await messagePublisher.PublishAsync("login-notifications", user.ToNotificationMessage(ipAddress!, deviceInfo));
 
             // Логируем успешный вход
             await auditService.LogLoginAsync(user.Id, ip, true, cancellationToken);
             await loginActivityService.RecordSuccessfulLoginAsync(user.Id, ip, deviceInfo, cancellationToken);
 
-            // Фиксируем транзакцию
+            var response = await tokenService.GenerateAuthResponseAsync(user, cancellationToken);
+            
+            // Если вход подозрительный, устанавливаем флаг для 2FA
+            // if (isSuspiciousLogin)
+            // {
+            //     response.RequiresTwoFactor = true;
+            //     // Здесь можно добавить логику отправки кода подтверждения
+            //     // await _twoFactorService.SendVerificationCodeAsync(user.Id, user.Email, cancellationToken);
+            // }
+            
             await transaction.CommitAsync(cancellationToken);
+            return response;
         }
         catch (Exception)
         {
-            // В случае ошибки откатываем транзакцию и пробрасываем исключение дальше
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
-
-        return await tokenService.GenerateAuthResponseAsync(user, cancellationToken);
     }
-
-    /// <exception cref="ArgumentException"></exception>
-    /// <inheritdoc/>
-    public async Task<AuthResponse> RegisterAsync(RegisterRequest request, string? ipAddress, CancellationToken cancellationToken = default)
+    
+    public async Task<AuthResponse> RegisterAsync(CreateUserCommand userCommand, string? ipAddress, string userAgent, CancellationToken cancellationToken = default)
     {
         var ip = ipAddress ?? "Unknown";
-        // Валидация email
-        var emailValidator = new EmailAddressAttribute();
-        if (!emailValidator.IsValid(request.Email))
-            throw new ArgumentException("Некорректный формат email.", nameof(request.Email));
+        var deviceInfo = DeviceInfoParser.GetDeviceInfo(userAgent);
 
-        // Проверка сложности пароля
-        if (request.Password.Length < 8)
-            throw new ArgumentException("Пароль должен содержать минимум 8 символов.", nameof(request.Password));
+        // 🔹 Проверяем, существует ли уже пользователь с таким Email
+        await mediator.Send(new ExistingUserRequest(userCommand.Email), cancellationToken);
+        
+        //Проверка на уникальность username
+        await mediator.Send(new ExistingByUsernameRequest(userCommand.Username), cancellationToken);
 
-        AuthResponse response;
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            var user = await addUserHandler.Handler(request, cancellationToken);
+            var user = await mediator.Send(new CreateUserCommand
+            {
+                Email = userCommand.Email,
+                Password = userCommand.Password,
+                Username = userCommand.Username,
+                FirstName = userCommand.FirstName,
+                LastName = userCommand.LastName,
+            }, cancellationToken);
 
             // Логирование регистрации
             await auditService.LogRegistrationAsync(user.Id, ip, true, cancellationToken);
-
-            // Фиксируем транзакцию
-            await transaction.CommitAsync(cancellationToken);
+            var response = await tokenService.GenerateAuthResponseAsync(user, cancellationToken);
             
-            response = await tokenService.GenerateAuthResponseAsync(user, cancellationToken);
-
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-        {
-            // PostgreSQL error 23505: уникальный индекс нарушен
-            await transaction.RollbackAsync(cancellationToken);
-            throw new UserAlreadyExistsException();
-        }
-        catch
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            throw;
-        }
-
-        return response;
-    }
-
-    /// <inheritdoc />
-    public async Task<AuthResponse> RefreshTokenAsync(string refreshToken, string? ipAddress, CancellationToken cancellationToken = default)
-    {
-        // Проверяем наличие refresh токена в базе данных
-        var existingRefreshToken = await getRefreshTokenHandler.Handler(refreshToken, cancellationToken);
-
-        // Если токен не найден или просрочен - логируем и возвращаем ошибку
-        if (existingRefreshToken is null || existingRefreshToken.ExpiresAt < DateTime.UtcNow || existingRefreshToken.IsRevoked)
-        {
-            await auditService.LogRefreshTokenFailureAsync(refreshToken, ipAddress, cancellationToken);
-            throw new SecurityTokenException();
-        }
-
-        var user = existingRefreshToken.User;
-
-        TokenResponse tokens;
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        try
-        {
-            // Деактивируем старый refresh токен
-            existingRefreshToken.IsRevoked = true;
-            existingRefreshToken.RevokedAt = DateTime.UtcNow;
-
-            // Удаляем старые токены пользователя
-            await deleteRefreshTokenHandler.Handler(user, cancellationToken);
-
-            tokens = await addRefreshTokenHandler.Handler(user, cancellationToken);
-
-            // Фиксируем транзакцию
+            // Отправляем уведомление в RabbitMQ
+            await messagePublisher.PublishAsync("login-notifications", user.ToNotificationMessage(ipAddress!, deviceInfo));
             await transaction.CommitAsync(cancellationToken);
+
+            return response;
         }
         catch
         {
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
-
-        // Возвращаем пользователя с новыми токенами
-        return new AuthResponse
-        {
-            Token = tokens.JwtToken,
-            RefreshToken = tokens.RefreshToken.ToString(),
-            ExpiresAt = DateTime.UtcNow.AddDays(3),
-            User = new UserDto
-            {
-                Id = user.Id,
-                Email = user.Email,
-                FirstName = user.FirstName,
-                LastName = user.LastName,
-                Role = RoleManagementService.GetRoleDescription(user.Role)
-            }
-        };
+        
     }
 
     public async Task LogoutAsync(LogoutRequest request, string? ipAddress, string userAgent, CancellationToken cancellationToken = default)
@@ -198,51 +147,18 @@ public class AuthService(
         var deviceInfo = DeviceInfoParser.GetDeviceInfo(userAgent);
 
         // Проверяем наличие токена
-        var token = await context.RefreshTokens
-            .Include(rt => rt.User)
-            .FirstOrDefaultAsync(rt => rt.Token == request.RefreshToken, cancellationToken);
-
-        if (token is null)
-            throw new InvalidOperationException();
-
-        if (token.ExpiresAt < DateTime.UtcNow)
-            throw new UnauthorizedAccessException();
+        var token = await mediator.Send(new GetRefreshTokenRequest(request.RefreshToken, ip), cancellationToken);
 
         // Начинаем транзакцию, так как вносим изменения
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            if (request.LogoutFromAllDevices)
-            {
-                // Отзываем все активные токены пользователя
-                var allUserTokens = await context.RefreshTokens
-                    .Where(rt => rt.UserId == token.UserId && !rt.IsRevoked) // Фикс условия
-                    .ToListAsync(cancellationToken);
-
-                foreach (var userToken in allUserTokens)
-                {
-                    userToken.IsRevoked = true;
-                    userToken.RevokedAt = DateTime.UtcNow;
-                }
-            }
-            else
-            {
-                // Отзываем только текущий токен
-                token.IsRevoked = true;
-                token.RevokedAt = DateTime.UtcNow;
-            }
-            await context.SaveChangesAsync(cancellationToken);
+            await mediator.Send(new RevokeTokensRequest(request, token), cancellationToken);
             
             // Отправка сообщения о выходе в очередь
-            var notificationMessage = new LogoutNotificationMessage
-            {
-                UserId = token.UserId,
-                Email = token.User.Email,
-                IpAddress = ip,
-                DeviceInfo = deviceInfo,
-                LogoutTime = DateTime.UtcNow
-            };
-            await messagePublisher.PublishAsync("logout-notifications", notificationMessage);
+            await messagePublisher.PublishAsync("logout-notifications",
+                token.User!.NotificationMessage(ipAddress!, deviceInfo));
+            
             await auditService.LogLogoutAsync(token.UserId, ip, request.LogoutFromAllDevices, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }

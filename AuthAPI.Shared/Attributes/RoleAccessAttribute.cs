@@ -1,5 +1,4 @@
 using AuthAPI.Domain.Enums;
-using AuthorizationAPI.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -9,7 +8,7 @@ namespace AuthAPI.Shared.Attributes;
 /// <summary>
 /// Расширенный атрибут для контроля доступа на основе ролей
 /// </summary>
-[AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, Inherited = true, AllowMultiple = true)]
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = true)]
 public class RoleAccessAttribute : AuthorizeAttribute, IAuthorizationFilter
 {
     private readonly UserRole[] _allowedRoles;

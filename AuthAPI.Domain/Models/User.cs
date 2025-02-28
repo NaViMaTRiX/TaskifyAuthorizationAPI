@@ -1,28 +1,33 @@
 using System.ComponentModel.DataAnnotations;
 using AuthAPI.Domain.Enums;
-using AuthorizationAPI.Domain.Enums;
 
 namespace AuthAPI.Domain.Models;
 
 public class User
 {
     [Key]
-    public Guid Id { get; set; }
+    [Required]
+    public Guid Id { get; init; }
     
     [Required]
     [EmailAddress]
-    public string Email { get; set; }
+    [MaxLength(50, ErrorMessage = "Email не должен превышать 100 символов.")]
+    public required string Email { get; set; }
     
     [Required]
-    public string PasswordHash { get; set; }
+    public required string PasswordHash { get; set; }
     
     [Required]
-    public string FirstName { get; set; }
+    [StringLength(30, MinimumLength = 3)]
+    public required string Username { get; set; }
     
-    [Required]
-    public string LastName { get; set; }
+    [StringLength(30)]
+    public string? FirstName { get; set; }
     
-    public DateTime CreatedAt { get; set; }
+    [StringLength(30)]
+    public string? LastName { get; set; }
+    
+    public DateTime CreatedAt { get; init; }
     public DateTime? LastLoginAt { get; set; }
     
     // Добавляем роль пользователя
@@ -30,5 +35,11 @@ public class User
     public UserRole Role { get; set; } = UserRole.User;
     
     // Навигационное свойство для refresh токенов
-    public List<RefreshToken> RefreshTokens { get; set; } = new();
+    public List<RefreshToken> RefreshTokens { get; init; } = new();
+
+
+    public void LastTimeLogin()
+    {
+        LastLoginAt = DateTime.UtcNow;
+    }
 }

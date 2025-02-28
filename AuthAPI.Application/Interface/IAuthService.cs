@@ -1,3 +1,4 @@
+using AuthAPI.Application.CQRS.Commands.User.CreateUser;
 using AuthAPI.Application.Dto;
 
 namespace AuthAPI.Application.Interface;
@@ -15,12 +16,7 @@ public interface IAuthService
     /// <summary>
     /// Регистрация нового пользователя
     /// </summary>
-    Task<AuthResponse> RegisterAsync(RegisterRequest request, string? ipAddress, CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Обновление токена доступа
-    /// </summary>
-    Task<AuthResponse> RefreshTokenAsync(string refreshToken,string? ipAddress, CancellationToken cancellationToken = default);
+    Task<AuthResponse> RegisterAsync(CreateUserCommand userCommand, string? ipAddress, string userAgent, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Выход пользователя из системы

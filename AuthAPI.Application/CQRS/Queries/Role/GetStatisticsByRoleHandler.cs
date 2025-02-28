@@ -1,33 +1,27 @@
 using AuthAPI.Application.CQRS.Queries.User;
 using AuthAPI.Application.Dto;
-using AuthAPI.Application.Services.Role;
-using AuthAPI.DAL.Repository;
+using AuthAPI.Application.Mapping;
+using AuthAPI.DAL.Interfaces;
+using MediatR;
 
 namespace AuthAPI.Application.CQRS.Queries.Role;
 
-public class GetStatisticsByRoleHandler(UserRepository userRepository, CountAsyncHandler countHandler)
+public record GetStatisticsByRoleRequest() : IRequest<List<RoleStatisticsDto>>;
+
+public class GetStatisticsByRoleHandler(IRoleRepository roleRepository, CountAsyncHandler countHandler) 
+    : IRequestHandler<GetStatisticsByRoleRequest, List<RoleStatisticsDto>>
 {
-    public async Task<List<RoleStatisticsDto>> Handler(CancellationToken cancellationToken = default)
+    public async Task<List<RoleStatisticsDto>> Handle(GetStatisticsByRoleRequest request, CancellationToken cancellationToken = default)
     {
+        if (request is null)
+            throw new ArgumentNullException(nameof(request));
+        
         var totalUsers = await countHandler.Handler(cancellationToken);
-        var userRole = await userRepository.GetUserRoleUserTable(cancellationToken);
 
-        if (userRole is null)
-            throw new KeyNotFoundException();
+        var userRole = await roleRepository.AllRolesGroupByAsync(cancellationToken);
 
-        var roleStatisticsDto =  userRole
-            .Select(g => new RoleStatisticsDto
-            {
-                Role = g.Key,
-                RoleDescription = RoleManagementService.GetRoleDescription(g.Key),
-                UserCount = g.Count(),
-                Percentage = totalUsers > 0 
-                    ? Math.Round(g.Count() * 100.0 / totalUsers, 2) 
-                    : 0
-            })
-            .OrderByDescending(r => r.UserCount)
-            .ToList();
+        var roleStatisticsDto= userRole.ToRoleStatisticsDto(totalUsers);
 
-        return roleStatisticsDto;
+        return roleStatisticsDto!;
     }
 }

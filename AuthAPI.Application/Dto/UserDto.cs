@@ -1,26 +1,18 @@
 using AuthAPI.Application.Services.Role;
 using AuthAPI.Domain.Enums;
 using AuthAPI.Domain.Models;
-using AuthorizationAPI.Domain.Enums;
+using MediatR;
 
 namespace AuthAPI.Application.Dto;
 
-public class UserDto
+public record UserDto : IRequest<TokenResponse>
 {
-    public Guid Id { get; set; }
-    public string Email { get; set; }
-    public string FirstName { get; set; }
-    public string LastName { get; set; }
-    public string Role { get; set; }
+    public Guid Id { get; init; }
+    public string Email { get; init; }
+    public string Username { get; init; }
+    public string? FirstName { get; init; }
+    public string? LastName { get; init; }
+    public string Role { get; init; }
 
-    public UserDto() {}
-
-    public UserDto(User user)
-    {
-        Id = user.Id;
-        Email = user.Email;
-        FirstName = user.FirstName;
-        LastName = user.LastName;
-        Role = RoleManagementService.GetRoleDescription(user.Role);;
-    }
+    public UserDto(){}
 }

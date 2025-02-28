@@ -17,12 +17,12 @@ namespace AuthorizationAPI.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.0")
+                .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("AuthorizationAPI.Domain.Models.RefreshToken", b =>
+            modelBuilder.Entity("AuthAPI.Domain.Models.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -54,7 +54,7 @@ namespace AuthorizationAPI.Migrations
                     b.ToTable("RefreshTokens");
                 });
 
-            modelBuilder.Entity("AuthorizationAPI.Domain.Models.User", b =>
+            modelBuilder.Entity("AuthAPI.Domain.Models.User", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -68,15 +68,15 @@ namespace AuthorizationAPI.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("FirstName")
-                        .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<DateTime?>("LastLoginAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("LastName")
-                        .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
@@ -84,6 +84,11 @@ namespace AuthorizationAPI.Migrations
 
                     b.Property<int>("Role")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
 
@@ -93,7 +98,7 @@ namespace AuthorizationAPI.Migrations
                     b.ToTable("Users");
                 });
 
-            modelBuilder.Entity("AuthorizationAPI.Domain.Models.UserAuditLog", b =>
+            modelBuilder.Entity("AuthAPI.Domain.Models.UserAuditLog", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -113,7 +118,7 @@ namespace AuthorizationAPI.Migrations
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid>("UserId")
+                    b.Property<Guid?>("UserId")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
@@ -125,24 +130,21 @@ namespace AuthorizationAPI.Migrations
                     b.ToTable("UserAuditLogs");
                 });
 
-            modelBuilder.Entity("AuthorizationAPI.Domain.Models.UserLoginActivity", b =>
+            modelBuilder.Entity("AuthAPI.Domain.Models.UserLoginActivity", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("City")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
                     b.Property<string>("Country")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
                     b.Property<string>("DeviceBrowser")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
@@ -152,7 +154,6 @@ namespace AuthorizationAPI.Migrations
                         .HasColumnType("character varying(256)");
 
                     b.Property<string>("DeviceOs")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
@@ -191,9 +192,9 @@ namespace AuthorizationAPI.Migrations
                     b.ToTable("UserLoginActivities");
                 });
 
-            modelBuilder.Entity("AuthorizationAPI.Domain.Models.RefreshToken", b =>
+            modelBuilder.Entity("AuthAPI.Domain.Models.RefreshToken", b =>
                 {
-                    b.HasOne("AuthorizationAPI.Domain.Models.User", "User")
+                    b.HasOne("AuthAPI.Domain.Models.User", "User")
                         .WithMany("RefreshTokens")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -202,9 +203,9 @@ namespace AuthorizationAPI.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("AuthorizationAPI.Domain.Models.UserLoginActivity", b =>
+            modelBuilder.Entity("AuthAPI.Domain.Models.UserLoginActivity", b =>
                 {
-                    b.HasOne("AuthorizationAPI.Domain.Models.User", "User")
+                    b.HasOne("AuthAPI.Domain.Models.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -213,7 +214,7 @@ namespace AuthorizationAPI.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("AuthorizationAPI.Domain.Models.User", b =>
+            modelBuilder.Entity("AuthAPI.Domain.Models.User", b =>
                 {
                     b.Navigation("RefreshTokens");
                 });

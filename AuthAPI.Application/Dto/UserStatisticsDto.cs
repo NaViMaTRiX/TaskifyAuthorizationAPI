@@ -1,5 +1,4 @@
 using AuthAPI.Domain.Enums;
-using AuthorizationAPI.Domain.Enums;
 
 namespace AuthAPI.Application.Dto;
 
@@ -11,47 +10,47 @@ public class UserStatisticsDto
     /// <summary>
     /// Общее количество действий пользователя
     /// </summary>
-    public int TotalActions { get; set; }
+    public int TotalActions { get; init; }
 
     /// <summary>
     /// Количество успешных входов
     /// </summary>
-    public int SuccessfulLogins { get; set; }
+    public int SuccessfulLogins { get; init; }
 
     /// <summary>
     /// Количество неудачных входов
     /// </summary>
-    public int FailedLogins { get; set; }
+    public int FailedLogins { get; init; }
 
     /// <summary>
     /// Дата первого входа
     /// </summary>
-    public DateTime? FirstLoginDate { get; set; }
+    public DateTime? FirstLoginDate { get; init; }
 
     /// <summary>
     /// Дата последнего входа
     /// </summary>
-    public DateTime? LastLoginDate { get; set; }
+    public DateTime? LastLoginDate { get; init; }
 
     /// <summary>
     /// Роль пользователя
     /// </summary>
-    public UserRole Role { get; set; }
+    public UserRole Role { get; init; }
 
     /// <summary>
     /// Описание роли
     /// </summary>
-    public string RoleDescription { get; set; } = string.Empty;
+    public string RoleDescription { get; init; } = string.Empty;
 
     /// <summary>
     /// Количество изменений роли
     /// </summary>
-    public int RoleChangeCount { get; set; }
+    public int RoleChangeCount { get; init; }
 
     /// <summary>
     /// Список последних действий
     /// </summary>
-    public List<UserAuditLogDto>? RecentActions { get; set; }
+    public IEnumerable<UserAuditLogDto> RecentActions { get; init; }
 }
 
 /// <summary>
@@ -62,15 +61,15 @@ public class UserAuditLogDto
     /// <summary>
     /// Тип действия
     /// </summary>
-    public AuditAction Action { get; set; }
+    public AuditAction Action { get; init; }
 
     /// <summary>
     /// Время действия
     /// </summary>
-    public DateTime Timestamp { get; set; }
+    public DateTime Timestamp { get; init; }
 
     /// <summary>
     /// Дополнительные детали
     /// </summary>
-    public string? Details { get; set; }
+    public string? Details { get; init; }
 }

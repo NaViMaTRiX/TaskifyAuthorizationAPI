@@ -1,3 +1,5 @@
+using AuthAPI.Application.CQRS.Commands.User;
+using AuthAPI.Application.CQRS.Commands.User.UpdateUser;
 using AuthAPI.Application.Dto;
 
 namespace AuthAPI.Application.Interface;
@@ -21,4 +23,19 @@ public interface IUserService
     /// <param name="cancellationToken">Токен отмены</param>
     /// <returns>Список пользователей</returns>
     Task<IEnumerable<UserDto>> GetAllUsersAsync(CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Удаление пользователя
+    /// </summary>
+    /// <param name="command">Команда удаления пользователя</param>
+    /// <param name="cancellationToken">Токен отмены</param>
+    Task DeleteUserAsync(DeleteUserCommand command, string ipAddress, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Обновление данных пользователя
+    /// </summary>
+    /// <param name="command">Команда обновления пользователя</param>
+    /// <param name="cancellationToken">Токен отмены</param>
+    /// <returns>Обновленные данные пользователя</returns>
+    Task<UserDto> UpdateUserAsync(UpdateUserCommand command, string ipAddress, CancellationToken cancellationToken = default);
 }

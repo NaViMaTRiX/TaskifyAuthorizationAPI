@@ -2,13 +2,16 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using AuthAPI.Application.CQRS.Commands.RefreshToken;
+using AuthAPI.Application.CQRS.Queries.RefreshToken;
 using AuthAPI.Application.Dto;
 using AuthAPI.Application.Interface;
-using AuthAPI.Application.Services.Role;
+using AuthAPI.Application.Mapping;
 using AuthAPI.DAL.Data;
-using AuthAPI.Domain.Models;
-using Microsoft.EntityFrameworkCore;
+using AuthAPI.DAL.Interfaces;
+using MediatR;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using SecurityTokenException = AuthAPI.Shared.Exceptions.SecurityTokenException;
 
@@ -17,26 +20,37 @@ namespace AuthAPI.Application.Services.Authentication;
 /// <summary>
 /// Сервис для работы с токенами аутентификации
 /// </summary>
-public class TokenService(AuthDbContext context, IConfiguration configuration) : ITokenService
+public class TokenService(AuthDbContext context,
+    IRefreshTokenRepository refreshTokenRepository,
+    IConfiguration configuration,
+    IMediator mediator,
+    ILogger<TokenService> logger) : ITokenService
 {
+
     /// <inheritdoc/>
     public string GenerateJwtToken(Domain.Models.User user)
     {
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["Jwt:Key"] ?? string.Empty));
-        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        if (user is null)
+        {
+            logger.LogError("Ошибка: пользователь null при генерации JWT токена.");
+            throw new ArgumentNullException(nameof(user), "Пользователь не может быть null.");
+        }
+
+        var key = Encoding.UTF8.GetBytes(configuration.GetRequiredSection("Jwt:Key").Value!);
+        var credentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256);
 
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Email, user.Email),
-            new Claim(ClaimTypes.GivenName, user.FirstName),
-            new Claim(ClaimTypes.Surname, user.LastName),
+            new Claim(ClaimTypes.GivenName, user.FirstName ?? string.Empty),
+            new Claim(ClaimTypes.Surname, user.LastName ?? string.Empty),
             new Claim(ClaimTypes.Role, user.Role.ToString())
         };
 
         var token = new JwtSecurityToken(
-            issuer: configuration["Jwt:Issuer"],
-            audience: configuration["Jwt:Audience"],
+            issuer: configuration.GetRequiredSection("Jwt:Issuer").Value,
+            audience: configuration.GetRequiredSection("Jwt:Audience").Value,
             claims: claims,
             expires: DateTime.UtcNow.AddDays(3),
             signingCredentials: credentials
@@ -45,194 +59,106 @@ public class TokenService(AuthDbContext context, IConfiguration configuration) :
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    /// <summary>
-    /// Создаёт refresh token
-    /// </summary>
-    /// <returns>Возвращает refresh token</returns>
+    /// <inheritdoc/>
     public string GenerateRefreshToken()
     {
-        var randomNumber = new byte[32];
+        int tokenSizeInBytes = 32;
+
+        Span<byte> randomNumber = stackalloc byte[tokenSizeInBytes];
         using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(randomNumber);
-        return Convert.ToBase64String(randomNumber);
+    
+        // URL-safe Base64 encoding without padding
+        return Convert.ToBase64String(randomNumber)
+            .Replace('+', '-')
+            .Replace('/', '_')
+            .TrimEnd('=');
     }
 
     /// <inheritdoc/>
     public async Task<AuthResponse> GenerateAuthResponseAsync(Domain.Models.User user, CancellationToken cancellationToken = default)
     {
-        var token = GenerateJwtToken(user);
-        var refreshTokenString = GenerateRefreshToken();
+        var tokens = await mediator.Send(new CreateRefreshTokenCommand(user),cancellationToken);
         
-        var refreshToken = new RefreshToken
-        {
-            Token = refreshTokenString,
-            UserId = user.Id,
-            CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(14)
-        };
-        
-        context.RefreshTokens.Add(refreshToken);
-        await context.SaveChangesAsync(cancellationToken);
-
-        return new AuthResponse
-        {
-            Token = token,
-            RefreshToken = refreshTokenString,
-            ExpiresAt = DateTime.UtcNow.AddDays(3),
-            User = new UserDto
-            {
-                Id = user.Id,
-                Email = user.Email,
-                FirstName = user.FirstName,
-                LastName = user.LastName,
-                Role = RoleManagementService.GetRoleDescription(user.Role)
-            }
-        };
+        //Мапим пользователя в ответ
+        return user.ToWithAuthResponse(tokens.JwtToken, tokens.RefreshToken.Token);
     }
 
-    /// <summary>
-    /// Проверка и извлечение claims из токена
-    /// </summary>
+    /// <inheritdoc/>
     public ClaimsPrincipal GetPrincipalFromExpiredToken(string token)
     {
+        var tokenHandler = new JwtSecurityTokenHandler();
+
         var tokenValidationParameters = new TokenValidationParameters
         {
             ValidateAudience = true,
             ValidateIssuer = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["Jwt:Key"] ?? string.Empty)),
-            ValidateLifetime = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["Jwt:Key"]!)),
+            ValidateLifetime = false,
             ValidIssuer = configuration["Jwt:Issuer"],
             ValidAudience = configuration["Jwt:Audience"]
         };
 
-        var tokenHandler = new JwtSecurityTokenHandler();
-        
-        try 
+        try
         {
-            var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
+            return tokenHandler.ValidateToken(token, tokenValidationParameters, out _);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Ошибка при валидации токена.");
+            throw new SecurityTokenException();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<AuthResponse> RefreshTokenAsync(string refreshToken, string? ipAddress, CancellationToken cancellationToken = default)
+    {
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            // Проверяем наличие refresh токена в базе данных
+            var existingRefreshToken = await mediator.Send(new GetRefreshTokenRequest(refreshToken, ipAddress!), cancellationToken);
             
-            // Проверяем, что токен корректного типа
-            if (securityToken is not JwtSecurityToken jwtToken || 
-                !jwtToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
-            {
-                throw new SecurityTokenException();
-            }
-
-            return principal;
-        }
-        catch (Exception)
-        {
-            throw new SecurityTokenException();
-        }
-    }
-
-    /// <summary>
-    /// Проверка валидности токена
-    /// </summary>
-    public bool IsJwtTokenExpired(string token)
-    {
-        var tokenHandler = new JwtSecurityTokenHandler();
-        var jwtToken = tokenHandler.ReadToken(token) as JwtSecurityToken;
-        
-        return jwtToken?.ValidTo < DateTime.UtcNow;
-    }
-
-    /// <inheritdoc/>
-    public async Task<AuthResponse> RefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
-    {
-        // Проверяем наличие refresh токена в базе данных
-        var existingRefreshToken = await context.RefreshTokens
-            .Include(rt => rt.User)
-            .FirstOrDefaultAsync(rt => rt.Token == refreshToken, cancellationToken);
-
-        // Если токен не найден или просрочен - возвращаем ошибку
-        if (existingRefreshToken == null || existingRefreshToken.ExpiresAt < DateTime.UtcNow)
-        {
-            throw new SecurityTokenException();
-        }
-
-        var user = existingRefreshToken.User;
-
-        // Удаляем старый refresh токен
-        context.RefreshTokens.Remove(existingRefreshToken);
-
-        // Генерируем новые токены
-        var newJwtToken = GenerateJwtToken(user);
-        var newRefreshTokenString = GenerateRefreshToken();
-
-        var newRefreshToken = new RefreshToken
-        {
-            Token = newRefreshTokenString,
-            UserId = user.Id,
-            CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(14)
-        };
-
-        // Сохраняем новый refresh токен
-        context.RefreshTokens.Add(newRefreshToken);
-        await context.SaveChangesAsync(cancellationToken);
-
-        // Возвращаем новые токены
-        return new AuthResponse
-        {
-            Token = newJwtToken,
-            RefreshToken = newRefreshTokenString,
-            ExpiresAt = DateTime.UtcNow.AddDays(3),
-            User = new UserDto
-            {
-                Id = user.Id,
-                Email = user.Email,
-                FirstName = user.FirstName,
-                LastName = user.LastName,
-                Role = RoleManagementService.GetRoleDescription(user.Role)
-            }
-        };
-    }
-
-    /// <inheritdoc/>
-    public async Task DeleteJwtTokenAsync(string token, CancellationToken cancellationToken = default)
-    {
-        // В текущей реализации JWT токены не хранятся в базе данных,
-        // поэтому удаление происходит на клиентской стороне
-        // Здесь можно добавить дополнительную логику инвалидации токена, если потребуется
-        await Task.CompletedTask;
-    }
-
-    /// <inheritdoc/>
-    public async Task DeleteRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
-    {
-        var token = await context.RefreshTokens
-            .FirstOrDefaultAsync(rt => rt.Token == refreshToken, cancellationToken);
-
-        if (token is not null)
-        {
-            context.RefreshTokens.Remove(token);
+            var user = existingRefreshToken.User!;
+            
+            // Деактивируем старый refresh токен пользователя
+            existingRefreshToken.Revoke();
             await context.SaveChangesAsync(cancellationToken);
+
+            // Удаляем старые токены пользователя? Хз может и не надо просто чистить раз в 2 месяца
+            await mediator.Send(new DeleteRefreshTokenCommand(user), cancellationToken);
+
+            var tokens = await mediator.Send(new CreateRefreshTokenCommand(user),cancellationToken);
+
+            // Фиксируем транзакцию
+            await transaction.CommitAsync(cancellationToken);
+            
+            // Возвращаем пользователя с новыми токенами
+            return tokens.ToAuthResponse(user);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
         }
     }
 
-    /// <summary>
-    /// Извлекает юзера из токена
-    /// </summary>
-    /// <param name="token"></param>
-    /// <param name="cancellationToken"></param>
-    /// <returns>Возвращает юзера по токену</returns>
-    /// <exception cref="SecurityTokenException"></exception>
-    public Task<JwtTokenClaimsDto> ExtractTokenClaimsAsync(string token, CancellationToken cancellationToken = default)
+    /// <inheritdoc/>
+    public async Task DeleteRefreshTokenAsync(string refreshToken, string ipAddress, CancellationToken cancellationToken = default)
+    {
+        await refreshTokenRepository.DeleteAsync(refreshToken, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public JwtTokenClaimsDto ExtractTokenClaims(string token, CancellationToken cancellationToken = default)
     {
         var tokenHandler = new JwtSecurityTokenHandler();
 
         if (tokenHandler.ReadToken(token) is not JwtSecurityToken jwtToken)
             throw new SecurityTokenException();
 
-        return Task.FromResult(new JwtTokenClaimsDto
-        {
-            UserId = Guid.Parse(jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value ?? Guid.Empty.ToString()),
-            Email = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value,
-            FirstName = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.GivenName)?.Value,
-            LastName = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Surname)?.Value,
-            Role = jwtToken.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Role)?.Value
-        });
+        return jwtToken.ToJwtTokenClaimsDto();
     }
 }
+

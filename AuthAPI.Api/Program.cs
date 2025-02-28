@@ -1,9 +1,19 @@
+using System.Reflection;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Security.Claims;
+using AuthAPI.Application.CQRS.Commands.RefreshToken;
+using AuthAPI.Application.CQRS.Commands.Role;
+using AuthAPI.Application.CQRS.Commands.User;
+using AuthAPI.Application.CQRS.Commands.User.CreateUser;
+using AuthAPI.Application.CQRS.Commands.UserAuditLogs;
+using AuthAPI.Application.CQRS.Queries.RefreshToken;
+using AuthAPI.Application.CQRS.Queries.Role;
+using AuthAPI.Application.CQRS.Queries.User;
+using AuthAPI.Application.CQRS.Queries.UserAuditLogs;
 using AuthAPI.Application.Interface;
 using AuthAPI.Application.Middleware;
 using AuthAPI.Application.Services;
@@ -12,14 +22,16 @@ using AuthAPI.Application.Services.Messaging;
 using AuthAPI.Application.Services.Role;
 using AuthAPI.Application.Services.User;
 using AuthAPI.DAL.Data;
+using AuthAPI.DAL.Interfaces;
+using AuthAPI.DAL.Repository;
 using AuthAPI.Domain.Enums;
-using AuthorizationAPI.Domain.Enums;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddLogging();
 
 // Configure Swagger
 builder.Services.AddSwaggerGen(c =>
@@ -111,6 +123,32 @@ builder.Services.AddScoped<RoleManagementService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<ILoginActivityService, LoginActivityService>();
 
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+
+builder.Services.AddScoped<CreateRefreshTokenHandler>();
+builder.Services.AddScoped<GetByIdAsyncHandler>();
+builder.Services.AddScoped<DeleteRefreshTokenHandler>();
+builder.Services.AddScoped<RevokeTokensHandler>();
+builder.Services.AddScoped<AddUserHandler>();
+builder.Services.AddScoped<UpdateRoleUserHandler>();
+builder.Services.AddScoped<GetRefreshTokenHandler>();
+builder.Services.AddScoped<GetStatisticsByRoleHandler>();
+builder.Services.AddScoped<CountAsyncHandler>();
+builder.Services.AddScoped<ExistingUserHandler>();
+builder.Services.AddScoped<GetByIdAsyncHandler>();
+builder.Services.AddScoped<GetUserByEmailHandler>();
+builder.Services.AddScoped<GetUsersByRoleAsyncHandler>();
+builder.Services.AddScoped<GetAuditLogsByUser>();
+builder.Services.AddScoped<CreateAuditLog>();
+builder.Services.AddScoped<GetUserRoleStatisticsHandler>();
+
+
+// Добавляем MediatR
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblies(Assembly.GetExecutingAssembly()));
+
+// Либо, если обработчики в другой сборке:
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblies(typeof(GetByIdAsyncHandler).Assembly));
+
 // Configure CORS
 builder.Services.AddCors(options =>
 {
@@ -133,7 +171,8 @@ if (app.Environment.IsDevelopment())
 }
 
 // Add custom exception handling middleware
-//app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseMiddleware<ValidationMiddleware>();
 
 app.UseHttpsRedirection();
 app.UseCors("AllowAll");

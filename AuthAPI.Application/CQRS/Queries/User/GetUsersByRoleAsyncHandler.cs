@@ -1,27 +1,26 @@
-using AuthAPI.DAL.Data;
+using AuthAPI.DAL.Repository;
 using AuthAPI.Domain.Enums;
-using Microsoft.EntityFrameworkCore;
+using MediatR;
 
 namespace AuthAPI.Application.CQRS.Queries.User;
 
-public class GetUsersByRoleAsyncHandler(AuthDbContext context)
+public record GetUsersByRoleRequest(UserRole Role) : IRequest<List<Domain.Models.User>>;
+
+public class GetUsersByRoleAsyncHandler(UserRepository userRepository)
+    : IRequestHandler<GetUsersByRoleRequest, List<Domain.Models.User>>
 {
     /// <summary>
-    /// Return user by role
+    /// Метод получения пользователей по роли
     /// </summary>
-    /// <param name="role">Role type UserRole</param>
+    /// <param name="request">User role(type UserRole)</param>
     /// <param name="cancellationToken">CancellationToken</param>
-    /// <returns></returns>
-    public async Task<List<Domain.Models.User>> Handler(UserRole role, CancellationToken cancellationToken = default)
+    /// <returns>Return users by role</returns>
+    public async Task<List<Domain.Models.User>> Handle(GetUsersByRoleRequest request, CancellationToken cancellationToken = default)
     {
-        var users = await context.Users
-            .AsNoTracking()
-            .Where(u => u.Role == role)
-            .ToListAsync(cancellationToken);
+        if (request is null)
+            throw new ArgumentNullException(nameof(request));
         
-        if (users is null) //TODO: надо сделать Exception отдельный
-            throw new KeyNotFoundException();
-
-        return users;
+        var role = request.Role;
+        return  (await userRepository.GetByRoleAsync(role, cancellationToken))!;
     }
 }

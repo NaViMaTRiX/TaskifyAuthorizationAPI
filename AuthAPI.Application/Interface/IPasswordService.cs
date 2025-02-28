@@ -13,7 +13,7 @@ public interface IPasswordService
     string HashPassword(string password);
 
     /// <summary>
-    /// Проверка пароля
+    /// Проверка хэша пароль
     /// </summary>
     /// <param name="password">Пароль для проверки</param>
     /// <param name="hash">Хеш для сравнения</param>

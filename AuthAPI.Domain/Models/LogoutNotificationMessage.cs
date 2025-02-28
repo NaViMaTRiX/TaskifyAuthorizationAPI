@@ -1,11 +1,11 @@
 namespace AuthAPI.Domain.Models;
 
-public class LogoutNotificationMessage
+public readonly record struct LogoutNotificationMessage
 {
-    public Guid UserId { get; set; }
-    public string? Email { get; set; }
-    public string? IpAddress { get; set; }
-    public string? DeviceInfo { get; set;}
-    public DateTime LogoutTime { get; set; }
-    public bool LogoutFromAllDevices { get; set; } // такое себе
+    public Guid UserId { get; init; }
+    public required string Email { get; init; }
+    public required string IpAddress { get; init; }
+    public required string DeviceInfo { get; init;}
+    public DateTime LogoutTime { get; init; }
+    public bool LogoutFromAllDevices { get; init; } // такое себе
 }

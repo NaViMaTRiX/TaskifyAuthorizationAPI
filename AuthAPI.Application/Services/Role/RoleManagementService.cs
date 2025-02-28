@@ -1,13 +1,14 @@
 using System.ComponentModel;
 using System.Reflection;
-using AuthAPI.Application.CQRS.Commands.User;
+using AuthAPI.Application.CQRS.Commands.Role;
 using AuthAPI.Application.CQRS.Commands.UserAuditLogs;
 using AuthAPI.Application.CQRS.Queries.Role;
 using AuthAPI.Application.CQRS.Queries.User;
 using AuthAPI.Application.CQRS.Queries.UserAuditLogs;
 using AuthAPI.Application.Dto;
+using AuthAPI.Application.Mapping;
 using AuthAPI.Domain.Enums;
-using AuthorizationAPI.Domain.Enums;
+using MediatR;
 
 namespace AuthAPI.Application.Services.Role;
 
@@ -15,35 +16,29 @@ namespace AuthAPI.Application.Services.Role;
 /// Сервис управления ролями пользователей
 /// </summary>
 public class RoleManagementService(
-    GetByIdAsyncHandler idAsyncHandler, 
-    PutRoleHandler changeRoleHandler, 
-    AddUserAuditLog addUserAuditLog,
-    GetUsersByRoleAsyncHandler getUsersByRoleHandler,
-    GetStatisticsByRoleHandler getStatisticsByRoleHandler,
-    GetUserAuditLogsByUser getAuditLogsByUserHandler,
-    GetUserRoleStatisticsHandler getUserRoleStatisticsHandler)
+    IMediator mediator )
 {
     /// <summary>
     /// Изменить роль пользователя
     /// </summary>
-    public async Task<bool> ChangeUserRoleAsync(
-        Guid userId, 
-        UserRole newRole, 
-        UserRole currentUserRole, 
+    public async Task ChangeUserRoleAsync(
+        Guid userId,
+        UserRole newRole,
+        UserRole currentUserRole,
+        string ipAddress,
         CancellationToken cancellationToken = default)
     {
         // Проверка прав на изменение роли
         if (currentUserRole != UserRole.Admin && currentUserRole != UserRole.SuperAdmin)
             throw new UnauthorizedAccessException("Недостаточно прав для изменения роли");
 
-        var user = await idAsyncHandler.Handler(userId, cancellationToken);
-
-        var oldRole = await changeRoleHandler.Handler(user, newRole, cancellationToken);
+        var user = await mediator.Send(new GetByIdRequest(userId), cancellationToken);
         
-        // Логируем изменение роли с подробным описанием
-        await addUserAuditLog.Handler(userId, oldRole, newRole, cancellationToken);
-
-        return true;
+        //TODO: Надо подумать над этим куда его деть
+        var oldRole = await mediator.Send(new UpdateRoleCommand(user, newRole), cancellationToken);
+        
+        // Логируем изменение роли
+        await mediator.Send(new CreateAuditLogCommand(userId, AuditAction.RoleChanged, ipAddress), cancellationToken);
     }
 
     /// <summary>
@@ -53,7 +48,7 @@ public class RoleManagementService(
         UserRole role, 
         CancellationToken cancellationToken = default)
     {
-        return await getUsersByRoleHandler.Handler(role, cancellationToken);
+        return await mediator.Send(new GetUsersByRoleRequest(role), cancellationToken);
     }
 
     /// <summary>
@@ -62,7 +57,7 @@ public class RoleManagementService(
     public async Task<Dictionary<UserRole, int>> GetUserRoleStatisticsAsync(
         CancellationToken cancellationToken = default)
     {
-        return await getUserRoleStatisticsHandler.Handler(cancellationToken);
+        return await mediator.Send(new GetUserRoleStatisticsRequest(), cancellationToken);
     }
 
     /// <summary>
@@ -71,20 +66,21 @@ public class RoleManagementService(
     public async Task<List<RoleStatisticsDto>> GetDetailedRoleStatisticsAsync(
         CancellationToken cancellationToken = default)
     {
-        var roleStats = await getStatisticsByRoleHandler.Handler(cancellationToken);
+        var roleStats = await mediator.Send(new GetStatisticsByRoleRequest(), cancellationToken);
 
         return roleStats;
     }
 
     /// <summary>
-    /// Получить описание роли
+    /// Метод получение опиания роли
     /// </summary>
-    public static string GetRoleDescription(UserRole role)
+    public static string GetEnumDescription<TEnum>(TEnum value) where TEnum : Enum
     {
-        var fieldInfo = role.GetType().GetField(role.ToString());
+        var fieldInfo = value.GetType().GetField(value.ToString());
         var descriptionAttribute = fieldInfo?.GetCustomAttribute<DescriptionAttribute>();
-        return descriptionAttribute?.Description ?? role.ToString();
+        return descriptionAttribute?.Description ?? value.ToString();
     }
+
 
     /// <summary>
     /// Получить статистику по конкретному пользователю
@@ -94,10 +90,10 @@ public class RoleManagementService(
         CancellationToken cancellationToken = default)
     {
         // Получаем пользователя
-        var user = await idAsyncHandler.Handler(userId, cancellationToken);
+        var user = await mediator.Send(new GetByIdRequest(userId), cancellationToken);
 
         // Получаем аудит-логи пользователя
-        var userLogs = await getAuditLogsByUserHandler.Handler(userId, cancellationToken);
+        var userLogs = await mediator.Send(new GetAuditLogsByUserRequest(user.Id), cancellationToken);
 
         // Статистика входов
         var loginSuccessLogs = userLogs
@@ -109,22 +105,6 @@ public class RoleManagementService(
         var roleChangeLogs = userLogs
             .Count(log => log.Action == AuditAction.RoleChanged);
 
-        return new UserStatisticsDto
-        {
-            TotalActions = userLogs.Count,
-            SuccessfulLogins = loginSuccessLogs,
-            FailedLogins = loginFailedLogs,
-            FirstLoginDate = userLogs.MinBy(log => log.Timestamp)?.Timestamp,
-            LastLoginDate = userLogs.MaxBy(log => log.Timestamp)?.Timestamp,
-            Role = user.Role,
-            RoleDescription = GetRoleDescription(user.Role),
-            RoleChangeCount = roleChangeLogs,
-            RecentActions = userLogs.Select(log => new UserAuditLogDto
-            {
-                Action = log.Action,
-                Timestamp = log.Timestamp,
-                Details = log.Details
-            }).ToList()
-        };
+        return userLogs.ToUserStatisticsDto(user, loginSuccessLogs, loginFailedLogs, roleChangeLogs);
     }
 }
